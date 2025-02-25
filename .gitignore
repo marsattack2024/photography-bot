@@ -1,0 +1,163 @@
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+.env.development
+.env.test
+.env.production
+
+# Keep example env file
+!.env.example
+
+# Build output
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.sublime-workspace
+*.sublime-project
+
+# Testing
+coverage/
+.nyc_output/
+junit.xml
+test-results/
+playwright-report/
+cypress/videos/
+cypress/screenshots/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+.temp/
+
+# Debug
+.debug/
+debug.log
+.debug.env
+
+# TypeScript
+*.tsbuildinfo
+.tscache/
+tsconfig.tsbuildinfo
+
+# Miscellaneous
+.DS_Store
+Thumbs.db
+*.bak
+*.backup
+*.swp
+*.swo
+
+# Large media files
+*.mp4
+*.mov
+*.avi
+*.wmv
+*.flv
+*.mkv
+*.webm
+*.m4v
+
+# Large image files
+*.psd
+*.ai
+*.eps
+*.tiff
+*.raw
+*.cr2
+*.nef
+*.arw
+
+# Archives
+*.zip
+*.rar
+*.7z
+*.tar
+*.gz
+*.bz2
+
+# Database files
+*.sqlite
+*.db
+*.sql
+*.dump
+
+# Large binary files
+*.bin
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Project specific
+# Generated files
+src/generated/
+# Local development files
+.local/
+# Temporary uploads
+uploads/
+# Cache directories
+.cache-loader/
+# Development certificates
+*.pem
+*.key
+*.crt
+# Local development database
+*.sqlite3
+# Development assets
+assets/dev/
+
+# Documentation
+docs/_site/
+docs/.jekyll-cache/
+.docusaurus/
+.cache/
+public/
+
+# Dependency directories
+bower_components/
+
+# Output directories
+dist-*/
+build-*/
+out-*/
+
+# Editor directories
+.vscode-test/
+.history/
+
+# System files
+._*
+.Spotlight-V100
+.Trashes
+
+# Size-based exclusion (files over 10MB)
+# Use git lfs for large files if needed
+# To find large files: find . -type f -size +10M -exec ls -lh {} \; 
