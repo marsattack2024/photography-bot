@@ -1,58 +1,17 @@
 import { Client, Events, Message, ClientOptions, ActivityType, GatewayIntentBits, Partials } from 'discord.js';
 import { config } from 'dotenv';
+import path from 'path';
 import { enhancedLogger as logger } from '../utils/logger';
 import { Orchestrator } from '../orchestrator/orchestrator';
 import { CopywritingExpert } from '../specialists/copywritingExpert';
 
-// Load environment variables
-config();
+// Load environment variables explicitly
+config({ path: path.resolve(process.cwd(), '.env') });
 
 export class DiscordBot {
   private client: Client;
   private readonly token: string;
   private orchestrator: Orchestrator;
-
-  // Helper function to split long messages
-  private splitMessage(content: string, maxLength: number = 1900): string[] {
-    if (content.length <= maxLength) {
-      return [content];
-    }
-
-    const parts: string[] = [];
-    let currentPart = '';
-    const lines = content.split('\n');
-
-    for (const line of lines) {
-      if (currentPart.length + line.length + 1 > maxLength) {
-        if (currentPart) {
-          parts.push(currentPart.trim());
-          currentPart = '';
-        }
-        // If a single line is too long, split it
-        if (line.length > maxLength) {
-          const words = line.split(' ');
-          for (const word of words) {
-            if (currentPart.length + word.length + 1 > maxLength) {
-              parts.push(currentPart.trim());
-              currentPart = word;
-            } else {
-              currentPart += (currentPart ? ' ' : '') + word;
-            }
-          }
-        } else {
-          currentPart = line;
-        }
-      } else {
-        currentPart += (currentPart ? '\n' : '') + line;
-      }
-    }
-
-    if (currentPart) {
-      parts.push(currentPart.trim());
-    }
-
-    return parts;
-  }
 
   constructor() {
     // Validate environment variables
@@ -61,6 +20,13 @@ export class DiscordBot {
       throw new Error('DISCORD_BOT_TOKEN is required in environment variables');
     }
     this.token = token;
+
+    // Log environment state for debugging
+    logger.info('Discord Configuration', {
+      hasToken: !!token,
+      tokenLength: token.length,
+      prefix: process.env.DISCORD_BOT_PREFIX
+    });
 
     // Initialize Discord client with required intents
     const clientOptions: ClientOptions = {
@@ -92,21 +58,56 @@ export class DiscordBot {
     ]);
   }
 
-  public async start(): Promise<void> {
+  private async sendMessage(message: Message, content: string): Promise<void> {
     try {
-      // Set up event handlers
-      this.setupEventHandlers();
-      
-      // Login to Discord
-      await this.client.login(this.token);
-      
-      logger.info('Discord bot successfully started');
-      
-      // Set bot's activity status
-      this.client.user?.setActivity('DMs', { type: ActivityType.Watching });
+      // For THRC bot, we don't split messages - send them as is
+      await message.reply({ content });
     } catch (error) {
-      logger.error('Failed to start Discord bot', error as Error);
-      throw error;
+      if (error instanceof Error) {
+        logger.error('Failed to send message', error, {
+          userId: message.author.id,
+          messageId: message.id,
+          contentLength: content.length
+        });
+        
+        // If the message is too long for Discord's absolute limit (4000 characters)
+        if (content.length > 4000) {
+          await message.reply({
+            content: 'The response was too long for Discord. I will send it in multiple parts.'
+          });
+          
+          // Split only if absolutely necessary (Discord's hard limit)
+          for (let i = 0; i < content.length; i += 4000) {
+            await message.reply({
+              content: content.slice(i, i + 4000)
+            });
+          }
+        } else {
+          // For other errors, try sending a simplified version
+          await message.reply({
+            content: 'I encountered an error sending the full response. Here is a simplified version:\n\n' +
+                    content.slice(0, 1900)
+          });
+        }
+      }
+    }
+  }
+
+  private async handleError(message: Message, error?: Error): Promise<void> {
+    try {
+      let errorMessage = 'I apologize, but I encountered an error processing your message. Please try again later.';
+      
+      // Add more context if available
+      if (error?.message) {
+        errorMessage += `\n\nError details: ${error.message}`;
+      }
+
+      await this.sendMessage(message, errorMessage);
+    } catch (error) {
+      logger.error('Failed to send error message to user', error as Error, {
+        userId: message.author.id,
+        messageId: message.id,
+      });
     }
   }
 
@@ -150,7 +151,8 @@ export class DiscordBot {
         const startsWithPrefix = message.content.toLowerCase().startsWith(prefix.toLowerCase());
         const isDM = message.channel.isDMBased();
 
-        if (isDM || isMentioned || startsWithPrefix) {
+        // Only process if it's a DM or if it matches exactly one trigger condition
+        if (isDM || (isMentioned !== startsWithPrefix)) {
           // Clean up the message content
           let content = message.content;
           if (isMentioned) {
@@ -166,7 +168,7 @@ export class DiscordBot {
 
           // Send the response
           if (response.error) {
-            await this.handleError(message);
+            await this.handleError(message, new Error(response.error));
           } else {
             let replyContent = response.content;
             
@@ -175,11 +177,7 @@ export class DiscordBot {
               replyContent += '\n\nSources:\n' + response.sources.map(s => `• ${s}`).join('\n');
             }
 
-            // Split and send the message in parts if it's too long
-            const parts = this.splitMessage(replyContent);
-            for (const part of parts) {
-              await message.reply({ content: part });
-            }
+            await this.sendMessage(message, replyContent);
           }
         }
 
@@ -189,8 +187,7 @@ export class DiscordBot {
           messageId: message.id,
         });
 
-        // Send error message to user
-        await this.handleError(message);
+        await this.handleError(message, error as Error);
       }
     });
 
@@ -200,18 +197,21 @@ export class DiscordBot {
     });
   }
 
-  private async handleError(message: Message): Promise<void> {
+  public async start(): Promise<void> {
     try {
-      const errorMessage = 'I apologize, but I encountered an error processing your message. Please try again later.';
-      const parts = this.splitMessage(errorMessage);
-      for (const part of parts) {
-        await message.reply({ content: part });
-      }
+      // Set up event handlers
+      this.setupEventHandlers();
+      
+      // Login to Discord
+      await this.client.login(this.token);
+      
+      logger.info('Discord bot successfully started');
+      
+      // Set bot's activity status
+      this.client.user?.setActivity('DMs', { type: ActivityType.Watching });
     } catch (error) {
-      logger.error('Failed to send error message to user', error as Error, {
-        userId: message.author.id,
-        messageId: message.id,
-      });
+      logger.error('Failed to start Discord bot', error as Error);
+      throw error;
     }
   }
 
