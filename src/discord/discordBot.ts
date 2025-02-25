@@ -9,11 +9,23 @@ import { CopywritingExpert } from '../specialists/copywritingExpert';
 config({ path: path.resolve(process.cwd(), '.env') });
 
 export class DiscordBot {
+  private static instance: DiscordBot | null = null;
+  private static instanceCount = 0;
   private client: Client;
   private readonly token: string;
   private orchestrator: Orchestrator;
+  private instanceId: number;
 
   constructor() {
+    // Prevent multiple instances
+    if (DiscordBot.instance) {
+      throw new Error('DiscordBot is a singleton. Use DiscordBot.getInstance() instead.');
+    }
+    DiscordBot.instance = this;
+    
+    this.instanceId = ++DiscordBot.instanceCount;
+    logger.info('Creating Discord bot instance', { instanceId: this.instanceId });
+
     // Validate environment variables
     const token = process.env.DISCORD_BOT_TOKEN;
     if (!token) {
@@ -112,6 +124,9 @@ export class DiscordBot {
   }
 
   private setupEventHandlers(): void {
+    // Clean up existing handlers
+    this.client.removeAllListeners();
+
     // Handle ready event
     this.client.once(Events.ClientReady, (client) => {
       logger.info('Discord bot is ready', { 
@@ -148,18 +163,57 @@ export class DiscordBot {
         // Handle DMs and mentions
         const prefix = process.env.DISCORD_BOT_PREFIX || 'thrcbot';
         const isMentioned = message.mentions.users.has(this.client.user!.id);
-        const startsWithPrefix = message.content.toLowerCase().startsWith(prefix.toLowerCase());
+        // More strict prefix checking - must be exact match at start
+        const startsWithPrefix = message.content.toLowerCase().startsWith(prefix.toLowerCase() + ' ');
         const isDM = message.channel.isDMBased();
 
-        // Only process if it's a DM or if it matches exactly one trigger condition
-        if (isDM || (isMentioned !== startsWithPrefix)) {
-          // Clean up the message content
-          let content = message.content;
-          if (isMentioned) {
-            content = content.replace(new RegExp(`<@!?${this.client.user!.id}>`), '').trim();
-          } else if (startsWithPrefix) {
-            content = content.slice(prefix.length).trim();
-          }
+        // Debug log the trigger conditions
+        logger.info('Message trigger conditions', {
+          instanceId: this.instanceId,
+          messageId: message.id,
+          isDM,
+          isMentioned,
+          startsWithPrefix,
+          content: message.content,
+          cleanContent: message.cleanContent,
+          prefix
+        });
+
+        // Determine trigger type and process only one
+        let shouldProcess = false;
+        let triggerType = '';
+        let content = message.content;
+
+        if (isDM) {
+          shouldProcess = true;
+          triggerType = 'DM';
+        } else if (isMentioned && !startsWithPrefix) {
+          shouldProcess = true;
+          triggerType = 'MENTION';
+          content = content.replace(new RegExp(`<@!?${this.client.user!.id}>`, 'g'), '').trim();
+        } else if (startsWithPrefix && !isMentioned) {
+          shouldProcess = true;
+          triggerType = 'PREFIX';
+          content = content.slice(prefix.length).trim();
+        }
+
+        // Log processing decision
+        logger.info('Processing decision', {
+          instanceId: this.instanceId,
+          messageId: message.id,
+          shouldProcess,
+          triggerType,
+          processedContent: content
+        });
+
+        if (shouldProcess) {
+          // Log before processing
+          logger.info('Processing message', {
+            instanceId: this.instanceId,
+            messageId: message.id,
+            triggerType,
+            content
+          });
 
           // Process the message through the orchestrator
           const response = await this.orchestrator.processRequest(content, {
@@ -217,26 +271,38 @@ export class DiscordBot {
 
   public async stop(): Promise<void> {
     try {
-      logger.info('Shutting down Discord bot...');
-      this.client.destroy();
-      logger.info('Discord bot successfully shut down');
+      logger.info('Shutting down Discord bot...', { instanceId: this.instanceId });
+      await this.client.destroy();
+      DiscordBot.instance = null;
+      logger.info('Discord bot successfully shut down', { instanceId: this.instanceId });
     } catch (error) {
-      logger.error('Error shutting down Discord bot', error as Error);
+      logger.error('Error shutting down Discord bot', error as Error, { instanceId: this.instanceId });
       throw error;
     }
   }
 }
 
-// Export singleton instance
-export const discordBot = new DiscordBot();
+// Modify singleton export
+let discordBotInstance: DiscordBot | null = null;
+
+export function getDiscordBot(): DiscordBot {
+  if (!discordBotInstance) {
+    discordBotInstance = new DiscordBot();
+  }
+  return discordBotInstance;
+}
 
 // Handle process termination
 process.on('SIGTERM', async () => {
   logger.info('Received SIGTERM signal');
-  await discordBot.stop();
+  if (discordBotInstance) {
+    await discordBotInstance.stop();
+  }
 });
 
 process.on('SIGINT', async () => {
   logger.info('Received SIGINT signal');
-  await discordBot.stop();
+  if (discordBotInstance) {
+    await discordBotInstance.stop();
+  }
 });

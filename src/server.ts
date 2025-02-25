@@ -1,9 +1,10 @@
-import { discordBot } from './discord/discordBot';
+import { getDiscordBot } from './discord/discordBot';
 import { enhancedLogger as logger } from './utils/logger';
 
 class Server {
   private static instance: Server;
   private isShuttingDown = false;
+  private discordBot = getDiscordBot();
 
   private constructor() {
     this.setupProcessHandlers();
@@ -34,7 +35,7 @@ class Server {
   public async start(): Promise<void> {
     try {
       logger.info('Starting server...');
-      await discordBot.start();
+      await this.discordBot.start();
       logger.info('Server started successfully');
     } catch (error) {
       logger.error('Failed to start server:', error as Error);
@@ -51,7 +52,7 @@ class Server {
     logger.info('Server shutdown initiated');
 
     try {
-      await discordBot.stop();
+      await this.discordBot.stop();
       logger.info('Server shutdown completed');
       process.exit(code);
     } catch (error) {
