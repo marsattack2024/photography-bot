@@ -1,40 +1,22 @@
 {
-  "name": "photography-bot",
+  "name": "photography-bot-monorepo",
   "version": "1.0.0",
-  "description": "A Discord bot for photography-related tasks",
-  "main": "dist/server.js",
-  "scripts": {
-    "build": "tsc",
-    "start": "node dist/server.js",
-    "dev": "ts-node src/server.ts",
-    "watch": "tsc -w",
-    "clean": "rm -rf dist",
-    "vercel-build": "npm run clean && npm run build"
-  },
-  "keywords": [
-    "discord",
-    "bot",
-    "photography"
+  "private": true,
+  "workspaces": [
+    "apps/*"
   ],
-  "author": "",
-  "license": "ISC",
-  "dependencies": {
-    "@supabase/supabase-js": "^2.49.1",
-    "@types/express": "^5.0.0",
-    "@types/node-fetch": "^2.6.12",
-    "axios": "^1.7.9",
-    "discord.js": "^14.18.0",
-    "dotenv": "^16.4.1",
-    "express": "^4.21.2",
-    "node-fetch": "^3.3.2",
-    "openai": "^4.85.4",
-    "winston": "^3.11.0",
-    "zod": "^3.24.2"
+  "scripts": {
+    "dev:web": "npm run dev --workspace=apps/web",
+    "dev:bot": "npm run dev --workspace=apps/discord-bot",
+    "build:web": "npm run build --workspace=apps/web",
+    "build:bot": "npm run build --workspace=apps/discord-bot",
+    "start:web": "npm run start --workspace=apps/web",
+    "start:bot": "npm run start --workspace=apps/discord-bot",
+    "lint": "npm run lint --workspaces",
+    "clean": "npm run clean --workspaces"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
-    "@types/winston": "^2.4.4",
-    "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
   }
-}
+} 

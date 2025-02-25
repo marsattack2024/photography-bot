@@ -1,16 +1,12 @@
 {
   "version": 2,
+  "buildCommand": "npm run build:web",
+  "outputDirectory": "apps/web/.next",
+  "ignoreCommand": "git diff HEAD^ HEAD --quiet ./apps/web/",
   "builds": [
     {
-      "src": "dist/server.js",
-      "use": "@vercel/node"
+      "src": "apps/web/next.config.js",
+      "use": "@vercel/next"
     }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "dist/server.js"
-    }
-  ],
-  "outputDirectory": "dist"
+  ]
 } 
