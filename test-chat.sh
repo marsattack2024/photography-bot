@@ -9,15 +9,9 @@ clean_env() {
         OPENAI_ORG_ID
         OPENAI_PROJECT_ID
         OPENAI_MODEL
-        DISCORD_BOT_TOKEN
-        DISCORD_CLIENT_ID
-        DISCORD_GUILD_ID
-        DISCORD_BOT_PREFIX
         SUPABASE_URL
         SUPABASE_KEY
         SUPABASE_ANON_KEY
-        SCRAPER_WEBHOOK_SECRET
-        SCRAPER_API_KEY
     )
 
     # Unset each variable
@@ -38,9 +32,6 @@ export PATH="$PATH"
 export HOME="$HOME"
 export USER="$USER"
 export SHELL="$SHELL"
-export npm_config_prefix="$npm_config_prefix"
-export NODE="$NODE"
-export npm_node_execpath="$npm_node_execpath"
 
 # Source .env file
 if [ -f .env ]; then
@@ -55,12 +46,9 @@ fi
 
 # Verify environment
 echo "Verifying environment..."
-echo "OpenAI API Key (last 4): ${OPENAI_API_KEY: -4}"
-echo "OpenAI Project ID: $OPENAI_PROJECT_ID"
-echo "OpenAI Base Path: $OPENAI_API_BASE_PATH"
-echo "Discord Bot Token exists: $([ -n "$DISCORD_BOT_TOKEN" ] && echo "Yes" || echo "No")"
-echo "Scraper Endpoint: $SCRAPER_ENDPOINT"
+echo "Supabase URL exists: $([ -n "$SUPABASE_URL" ] && echo "Yes" || echo "No")"
+echo "Supabase Key exists: $([ -n "$SUPABASE_KEY" ] && echo "Yes" || echo "No")"
 
-# Start the bot
-echo "Starting bot..."
-npm run dev 
+# Run the test
+echo "Running chat functionality test..."
+NODE_ENV=test npx ts-node src/test-chat.ts 

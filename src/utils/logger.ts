@@ -130,7 +130,17 @@ class LoggerWithContext {
 export const enhancedLogger = new LoggerWithContext();
 
 // Export type for metadata
-export type LogMetadata = Record<string, unknown>;
+export interface LogMetadata {
+    [key: string]: unknown;
+    errorDetails?: {
+        message?: string;
+        name?: string;
+        stack?: string;
+        code?: string;
+        details?: unknown;
+        hint?: string;
+    };
+}
 
 // Add shutdown handler
 process.on('SIGTERM', () => {

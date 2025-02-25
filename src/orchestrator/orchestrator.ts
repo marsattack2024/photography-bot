@@ -137,12 +137,24 @@ export class Orchestrator {
      */
     private async handleGeneralRequest(query: string, context: AgentContext): Promise<AgentResponse> {
         try {
+            // Build system message with context
+            let systemMessage = 'You are a helpful assistant with expertise in photography and marketing.';
+            
+            // Add scraped content if available
+            if (context.scrapedContent?.length) {
+                systemMessage += '\n\nI have access to the following information from the URLs mentioned:\n';
+                context.scrapedContent.forEach(doc => {
+                    systemMessage += `\nURL: ${doc.url}\nTitle: ${doc.title || 'N/A'}\nDescription: ${doc.description || 'N/A'}\nContent: ${doc.content}\n---`;
+                });
+                systemMessage += '\n\nPlease use this information to provide an accurate and helpful response.';
+            }
+
             const completion = await openai.chat.completions.create({
                 model: OPENAI_MODEL,
                 messages: [
                     {
                         role: 'system',
-                        content: 'You are a helpful assistant with expertise in photography and marketing.'
+                        content: systemMessage
                     },
                     { role: 'user', content: query }
                 ],

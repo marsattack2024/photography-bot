@@ -5,6 +5,8 @@ import fs from 'fs';
 import { enhancedLogger as logger } from '../utils/logger';
 import { Orchestrator } from '../orchestrator/orchestrator';
 import { CopywritingExpert } from '../specialists/copywritingExpert';
+import { createChatSession, getChatSession, getChatHistory, storeMessage } from '../db/supabase';
+import { ChatMessage } from '../db/supabase';
 
 // Load environment variables explicitly
 config({ path: path.resolve(process.cwd(), '.env') });
@@ -20,6 +22,7 @@ export class DiscordBot {
   private processedMessages = new Map<string, number>();
   private sentResponses = new Map<string, number>();
   private readonly messageExpiryMs = 60000; // 1 minute expiry for processed messages
+  private userSessions = new Map<string, string>(); // Map user IDs to session IDs
 
   public static getInstance(): DiscordBot {
     if (!DiscordBot._instance) {
@@ -257,6 +260,102 @@ export class DiscordBot {
     }
   }
 
+  /**
+   * Get or create a chat session for a user
+   */
+  private async getOrCreateSession(userId: string): Promise<string> {
+    try {
+      // Check if user has an existing session
+      const existingSessionId = this.userSessions.get(userId);
+      if (existingSessionId) {
+        // Verify the session still exists
+        const session = await getChatSession(existingSessionId);
+        if (session) {
+          return existingSessionId;
+        }
+        // Session not found, remove from map
+        this.userSessions.delete(userId);
+      }
+
+      // Create new session
+      const session = await createChatSession();
+      this.userSessions.set(userId, session.id);
+      
+      logger.info('Created new chat session for user', {
+        userId,
+        sessionId: session.id
+      });
+
+      return session.id;
+    } catch (error) {
+      logger.error('Failed to get/create chat session', error as Error, { userId });
+      throw error;
+    }
+  }
+
+  /**
+   * Get chat history for the orchestrator
+   */
+  private async getChatHistoryForOrchestrator(sessionId: string): Promise<Array<{ role: 'user' | 'assistant'; content: string }>> {
+    try {
+      const history = await getChatHistory(sessionId);
+      return history.map((msg: ChatMessage) => ({
+        role: msg.role,
+        content: msg.content
+      }));
+    } catch (error) {
+      logger.error('Failed to get chat history', error as Error, { sessionId });
+      return []; // Return empty history on error
+    }
+  }
+
+  private async handleMessage(message: Message, content: string): Promise<void> {
+    try {
+      // Get or create session for user
+      const sessionId = await this.getOrCreateSession(message.author.id);
+      
+      // Get chat history
+      const chatHistory = await this.getChatHistoryForOrchestrator(sessionId);
+
+      // Store user message
+      await storeMessage(sessionId, 'user', content);
+
+      // Process through orchestrator with chat history
+      const response = await this.orchestrator.processRequest(content, {
+        chatHistory
+      });
+
+      // Store assistant response
+      if (!response.error) {
+        await storeMessage(sessionId, 'assistant', response.content);
+      }
+
+      // Send the response
+      if (response.error) {
+        await this.handleError(message, new Error(response.error));
+      } else {
+        let replyContent = response.content;
+        
+        // Add sources if available
+        if (response.sources?.length) {
+          replyContent += '\n\nSources:\n' + response.sources.map(s => `• ${s}`).join('\n');
+        }
+
+        await this.sendMessage(message, replyContent);
+      }
+    } catch (error) {
+      logger.error('Error handling message', error as Error, {
+        messageId: message.id,
+        userId: message.author.id,
+        content
+      });
+      
+      if (!this.sentResponses.has(message.id)) {
+        await this.handleError(message, error as Error);
+      }
+    }
+  }
+
   private setupEventHandlers(): void {
     // Clean up existing handlers
     this.client.removeAllListeners();
@@ -318,7 +417,6 @@ export class DiscordBot {
         // Handle DMs and mentions
         const prefix = process.env.DISCORD_BOT_PREFIX || 'thrcbot';
         const isMentioned = message.mentions.users.has(this.client.user!.id);
-        // More strict prefix checking - must be exact match at start
         const startsWithPrefix = message.content.toLowerCase().startsWith(prefix.toLowerCase() + ' ');
         const isDM = message.channel.isDMBased();
 
@@ -358,40 +456,16 @@ export class DiscordBot {
         });
 
         if (shouldProcess) {
-          // Log before processing
-          logger.info('Processing message', {
-            triggerType,
-            content
-          });
-
-          // Process the message through the orchestrator
-          const response = await this.orchestrator.processRequest(content, {
-            chatHistory: [] // TODO: Implement chat history
-          });
-
-          // Send the response
-          if (response.error) {
-            await this.handleError(message, new Error(response.error));
-          } else {
-            let replyContent = response.content;
-            
-            // Add sources if available
-            if (response.sources?.length) {
-              replyContent += '\n\nSources:\n' + response.sources.map(s => `• ${s}`).join('\n');
-            }
-
-            await this.sendMessage(message, replyContent);
-          }
+          await this.handleMessage(message, content);
         }
 
       } catch (error) {
-        logger.error('Error handling message', error as Error, {
+        logger.error('Error in message event handler', error as Error, {
           messageId: message.id,
           userId: message.author.id,
           content: message.content
         });
         
-        // Only send error message if we haven't sent any response yet
         if (!this.sentResponses.has(message.id)) {
           await this.handleError(message, error as Error);
         }
