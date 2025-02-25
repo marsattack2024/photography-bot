@@ -1,9 +1,123 @@
 ---
-description:
+description: Architecture Mode
+globs: 
+---
+description: Typescript Project Rules for the Photography Bot
 globs:
+  - "src/**/*.ts"
+  - ".env"
+  - "package.json"
 ---
 
-# Your rule content
+# Project Rules
 
-- You can @ files here
-- You can use markdown but dont have to
+Below are coding and style guidelines for this **TypeScript** project, which is a Discord bot integrated with OpenAI, Supabase, and more. This file (`.cursor/rules/project-rules.mdc`) helps keep code style and structure consistent.
+
+## 1. Language & Style
+
+1. **Language**: TypeScript targeting Node.js 16+  
+2. **Strict Typing**: 
+   - `strict` compiler option enabled  
+   - No usage of `any` unless absolutely necessary  
+3. **Imports/Exports**:
+   - Use ES module style (where possible) or Node `CommonJS` if needed by the environment  
+   - Avoid default exports if the file exports multiple items  
+4. **Linting** (if you use ESLint/Prettier):
+   - Keep line length at ~100–120 max  
+   - Use explicit return types for functions where practical
+
+## 2. Architecture Guidelines
+
+1. **Discord Bot**:
+   - **Single** instance of the Discord client
+   - Keep logic in `discordBot.ts` or a similar dedicated module
+   - No duplicate event handlers for `messageCreate`
+2. **OpenAI**:
+   - Single `openai.ts` or `utils/openai.ts` file for all OpenAI config
+   - Must read `OPENAI_API_KEY` (preferably project-based key)
+   - Central place to handle model name (`OPENAI_MODEL`)
+3. **Supabase**:
+   - Use `createClient(supabaseUrl, supabaseKey)` in `supabase.ts`
+   - Keep DB logic separate from domain logic (e.g. `db/` folder)
+
+## 3. Code Organization
+
+1. **Directory Structure**:
+   - `src/`
+     - `discord/` for Discord bot (listeners, commands)
+     - `orchestrator/` for multi-agent logic
+     - `specialists/` for specialized agents (Google Ads, FB Ads, etc.)
+     - `db/` for Supabase clients, database operations
+     - `utils/` for shared utilities, logging, openai config
+   - `tests/` (optional) for test files
+2. **One Feature/Concept per File**:
+   - e.g. a single `googleAdsExpert.ts` file for the Google Ads agent
+3. **Naming**:
+   - Use PascalCase for class names
+   - Use camelCase for functions, variables
+   - Use UPPER_CASE for constants or environment variable placeholders
+
+## 4. Environment Variables
+
+1. **.env**:
+   - Keep secrets out of code
+   - Must define `DISCORD_BOT_TOKEN`, `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_ANON_KEY` (or service role key if needed)
+2. **Validation**:
+   - If a variable is critical, add checks in the corresponding `.ts` (e.g., throw if missing)
+3. **Security**:
+   - Never commit real secrets in the repo
+   - `.env` is in `.gitignore`
+
+## 5. Error Handling
+
+1. **Try/Catch** around external calls:
+   - e.g. Discord actions, OpenAI requests, Supabase queries
+2. **Logging**:
+   - Use Winston-based logger (`enhancedLogger`):
+     - `logger.error(...)` for errors
+     - `logger.info(...)` or `logger.debug(...)` for normal/troubleshooting logs
+3. **Surface user-friendly errors**:
+   - For Discord replies, show a friendly “I encountered an error” message to the user
+
+## 6. Bot Response Handling
+
+1. **Single reply per message**:
+   - Ensure only one message event listener is attached
+   - Double-check you do not call `bot.start()` more than once
+2. **Prefix vs. Mention**:
+   - Evaluate carefully to avoid collisions, e.g. `@BotName` vs. `thrcbot`
+   - If both are present, handle only one path
+
+## 7. Multi-Agent Orchestrator
+
+1. **Specialist Routing**:
+   - Orchestrator checks message content
+   - Calls specialized agent if applicable
+   - Provide fallback if no agent is triggered
+2. **Agent Outputs**:
+   - Combine them carefully, e.g., join content with a delimiter
+   - Avoid double responses in the final chat result
+
+## 8. Changes & Contributions
+
+1. **Git**:
+   - Commit small, self-contained changes
+   - Descriptive commit messages
+2. **Pull Requests**:
+   - Include context about what’s changed or fixed
+   - Tag relevant issues or tasks
+
+## 9. Additional Guidelines
+
+1. **Streaming** (optional):
+   - If you implement streaming responses from OpenAI, handle partial updates carefully in Discord
+2. **Rate Limiting**:
+   - If you have `MAX_CONCURRENT_REQUESTS`, ensure you queue or throttle calls so the bot doesn’t exceed usage
+
+## 10. Future Enhancements
+
+- Consider adding `jest` or another test runner under `tests/`
+- Automatic linting or code formatting with Prettier
+- Expand multi-agent architecture with new specialists
+
+
