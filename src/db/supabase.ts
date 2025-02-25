@@ -16,22 +16,15 @@ export const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Type definitions
 export interface DocumentMetadata {
-    url?: string;
-    title?: string;
-    description?: string;
-    sourceType?: string;
-    scrapeTimestamp?: string;
     [key: string]: unknown;
 }
 
 export interface Document {
-    id: string;
-    url: string;
-    title: string;
+    id: number;
     content: string;
     metadata: DocumentMetadata;
-    embedding: number[];
-    created_at: string;
+    similarity?: number;
+    created_at?: Date;
 }
 
 export interface ChatSession {

@@ -1,6 +1,7 @@
 import { Client, Events, Message, ClientOptions, ActivityType, GatewayIntentBits, Partials } from 'discord.js';
 import { config } from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 import { enhancedLogger as logger } from '../utils/logger';
 import { Orchestrator } from '../orchestrator/orchestrator';
 import { CopywritingExpert } from '../specialists/copywritingExpert';
@@ -9,22 +10,115 @@ import { CopywritingExpert } from '../specialists/copywritingExpert';
 config({ path: path.resolve(process.cwd(), '.env') });
 
 export class DiscordBot {
-  private static instance: DiscordBot | null = null;
-  private static instanceCount = 0;
+  private static _instance: DiscordBot | null = null;
+  private static isInitializing = false;
+  private static readonly LOCK_FILE = path.join(process.cwd(), '.discord-bot.lock');
   private client: Client;
   private readonly token: string;
   private orchestrator: Orchestrator;
-  private instanceId: number;
+  private isStarted = false;
+  private processedMessages = new Map<string, number>();
+  private sentResponses = new Map<string, number>();
+  private readonly messageExpiryMs = 60000; // 1 minute expiry for processed messages
 
-  constructor() {
-    // Prevent multiple instances
-    if (DiscordBot.instance) {
-      throw new Error('DiscordBot is a singleton. Use DiscordBot.getInstance() instead.');
+  public static getInstance(): DiscordBot {
+    if (!DiscordBot._instance) {
+      if (DiscordBot.isInitializing) {
+        throw new Error('Circular dependency detected in DiscordBot initialization');
+      }
+      DiscordBot.isInitializing = true;
+      DiscordBot._instance = new DiscordBot();
+      DiscordBot.isInitializing = false;
+      logger.info('Created new DiscordBot instance');
     }
-    DiscordBot.instance = this;
-    
-    this.instanceId = ++DiscordBot.instanceCount;
-    logger.info('Creating Discord bot instance', { instanceId: this.instanceId });
+    return DiscordBot._instance;
+  }
+
+  private static checkLock(): boolean {
+    try {
+      // Check if lock file exists
+      if (fs.existsSync(this.LOCK_FILE)) {
+        const lockData = fs.readFileSync(this.LOCK_FILE, 'utf8');
+        const { pid, timestamp } = JSON.parse(lockData);
+
+        // Check if the process is still running
+        try {
+          process.kill(pid, 0); // This throws if process doesn't exist
+          const age = Date.now() - timestamp;
+          logger.warn('Another bot instance is already running', {
+            processId: pid,
+            instanceAge: Math.floor(age / 1000) + ' seconds',
+            lockFilePath: this.LOCK_FILE
+          });
+          return true;
+        } catch (e) {
+          // Process is not running, safe to remove stale lock
+          logger.info('Removing stale lock file', {
+            processId: pid,
+            lockFilePath: this.LOCK_FILE
+          });
+          fs.unlinkSync(this.LOCK_FILE);
+        }
+      }
+      return false;
+    } catch (error) {
+      logger.error('Error checking lock file', error as Error, {
+        lockFilePath: this.LOCK_FILE
+      });
+      return false;
+    }
+  }
+
+  private static createLock(): void {
+    try {
+      const lockData = {
+        pid: process.pid,
+        timestamp: Date.now()
+      };
+      fs.writeFileSync(this.LOCK_FILE, JSON.stringify(lockData));
+      logger.info('Created lock file', {
+        processId: process.pid,
+        lockFilePath: this.LOCK_FILE
+      });
+
+      // Remove lock file on process exit
+      process.on('exit', () => {
+        try {
+          if (fs.existsSync(this.LOCK_FILE)) {
+            fs.unlinkSync(this.LOCK_FILE);
+            logger.info('Removed lock file on exit', {
+              processId: process.pid,
+              lockFilePath: this.LOCK_FILE
+            });
+          }
+        } catch (error) {
+          logger.error('Error removing lock file', error as Error, {
+            processId: process.pid,
+            lockFilePath: this.LOCK_FILE
+          });
+        }
+      });
+    } catch (error) {
+      logger.error('Error creating lock file', error as Error, {
+        processId: process.pid,
+        lockFilePath: this.LOCK_FILE
+      });
+      throw error;
+    }
+  }
+
+  private constructor() {
+    if (DiscordBot._instance) {
+      throw new Error('Use DiscordBot.getInstance() instead of new DiscordBot()');
+    }
+
+    // Check for existing instance
+    if (DiscordBot.checkLock()) {
+      throw new Error('Another instance of the bot is already running');
+    }
+
+    // Create lock file
+    DiscordBot.createLock();
 
     // Validate environment variables
     const token = process.env.DISCORD_BOT_TOKEN;
@@ -62,45 +156,85 @@ export class DiscordBot {
     };
 
     this.client = new Client(clientOptions);
+    this.orchestrator = new Orchestrator([new CopywritingExpert()]);
+  }
 
-    // Initialize orchestrator with specialists
-    this.orchestrator = new Orchestrator([
-      new CopywritingExpert(),
-      // Add other specialists here
-    ]);
+  private cleanupTrackedMessages(): void {
+    const now = Date.now();
+    for (const [messageId, timestamp] of this.processedMessages.entries()) {
+      if (now - timestamp > this.messageExpiryMs) {
+        this.processedMessages.delete(messageId);
+        this.sentResponses.delete(messageId);
+      }
+    }
   }
 
   private async sendMessage(message: Message, content: string): Promise<void> {
+    const MAX_MESSAGE_LENGTH = 2000; // Discord's actual message limit
+    
+    // Check if we've already sent a response to this message
+    if (this.sentResponses.has(message.id)) {
+      logger.warn('Attempted to send duplicate response', {
+        messageId: message.id,
+        timeSinceFirstResponse: Date.now() - (this.sentResponses.get(message.id) || 0)
+      });
+      return;
+    }
+
     try {
-      // For THRC bot, we don't split messages - send them as is
-      await message.reply({ content });
-    } catch (error) {
-      if (error instanceof Error) {
-        logger.error('Failed to send message', error, {
-          userId: message.author.id,
+      logger.info('Preparing to send response', {
+        messageId: message.id,
+        responseLength: content.length,
+        isDM: message.channel.isDMBased()
+      });
+
+      // Mark that we're sending a response to this message
+      this.sentResponses.set(message.id, Date.now());
+
+      if (content.length > MAX_MESSAGE_LENGTH) {
+        logger.info('Response exceeds Discord limit, splitting message', {
           messageId: message.id,
-          contentLength: content.length
+          totalLength: content.length,
+          chunks: Math.ceil(content.length / MAX_MESSAGE_LENGTH)
+        });
+
+        await message.reply({
+          content: 'The response was too long for Discord. I will send it in multiple parts.'
         });
         
-        // If the message is too long for Discord's absolute limit (4000 characters)
-        if (content.length > 4000) {
-          await message.reply({
-            content: 'The response was too long for Discord. I will send it in multiple parts.'
+        for (let i = 0; i < content.length; i += MAX_MESSAGE_LENGTH) {
+          const chunk = content.slice(i, i + MAX_MESSAGE_LENGTH);
+          await message.reply({ content: chunk });
+          logger.debug('Sent message chunk', {
+            messageId: message.id,
+            chunkIndex: Math.floor(i / MAX_MESSAGE_LENGTH) + 1,
+            chunkLength: chunk.length
           });
-          
-          // Split only if absolutely necessary (Discord's hard limit)
-          for (let i = 0; i < content.length; i += 4000) {
-            await message.reply({
-              content: content.slice(i, i + 4000)
-            });
-          }
-        } else {
-          // For other errors, try sending a simplified version
-          await message.reply({
-            content: 'I encountered an error sending the full response. Here is a simplified version:\n\n' +
-                    content.slice(0, 1900)
-          });
+          // Add a small delay between chunks to maintain order
+          await new Promise(resolve => setTimeout(resolve, 100));
         }
+      } else {
+        await message.reply({ content });
+        logger.info('Sent response successfully', {
+          messageId: message.id,
+          responseLength: content.length
+        });
+      }
+    } catch (error) {
+      // Remove from sent responses if the send failed
+      this.sentResponses.delete(message.id);
+      
+      logger.error('Failed to send message', error as Error, {
+        messageId: message.id,
+        userId: message.author.id,
+        contentLength: content.length
+      });
+      
+      // Only send error message if we haven't sent any response yet
+      if (!this.sentResponses.has(message.id)) {
+        await message.reply({
+          content: 'I encountered an error processing your request. Please try again later.'
+        });
       }
     }
   }
@@ -126,6 +260,7 @@ export class DiscordBot {
   private setupEventHandlers(): void {
     // Clean up existing handlers
     this.client.removeAllListeners();
+    logger.info('Removed all existing event listeners');
 
     // Handle ready event
     this.client.once(Events.ClientReady, (client) => {
@@ -141,18 +276,38 @@ export class DiscordBot {
       try {
         // Ignore messages from bots
         if (message.author.bot) {
+          logger.debug('Ignoring bot message', { messageId: message.id });
           return;
         }
 
+        // Check if message was already processed
+        if (this.processedMessages.has(message.id)) {
+          logger.warn('Skipping already processed message', { 
+            messageId: message.id,
+            content: message.content,
+            author: message.author.username,
+            timeSinceFirstProcess: Date.now() - (this.processedMessages.get(message.id) || 0)
+          });
+          return;
+        }
+
+        // Clean up old tracked messages periodically
+        this.cleanupTrackedMessages();
+
+        // Mark message as being processed
+        this.processedMessages.set(message.id, Date.now());
+
         // Debug logging for all messages
-        logger.info('Received message', {
+        logger.info('Processing new message', {
+          messageId: message.id,
           userId: message.author.id,
           username: message.author.username,
           content: message.content,
           isDM: message.channel.isDMBased(),
           channelType: message.channel.type,
           guildId: message.guild?.id,
-          channelId: message.channel.id
+          channelId: message.channel.id,
+          timestamp: new Date().toISOString()
         });
 
         // Show typing indicator if supported
@@ -169,8 +324,6 @@ export class DiscordBot {
 
         // Debug log the trigger conditions
         logger.info('Message trigger conditions', {
-          instanceId: this.instanceId,
-          messageId: message.id,
           isDM,
           isMentioned,
           startsWithPrefix,
@@ -199,8 +352,6 @@ export class DiscordBot {
 
         // Log processing decision
         logger.info('Processing decision', {
-          instanceId: this.instanceId,
-          messageId: message.id,
           shouldProcess,
           triggerType,
           processedContent: content
@@ -209,8 +360,6 @@ export class DiscordBot {
         if (shouldProcess) {
           // Log before processing
           logger.info('Processing message', {
-            instanceId: this.instanceId,
-            messageId: message.id,
             triggerType,
             content
           });
@@ -237,11 +386,15 @@ export class DiscordBot {
 
       } catch (error) {
         logger.error('Error handling message', error as Error, {
-          userId: message.author.id,
           messageId: message.id,
+          userId: message.author.id,
+          content: message.content
         });
-
-        await this.handleError(message, error as Error);
+        
+        // Only send error message if we haven't sent any response yet
+        if (!this.sentResponses.has(message.id)) {
+          await this.handleError(message, error as Error);
+        }
       }
     });
 
@@ -249,9 +402,16 @@ export class DiscordBot {
     this.client.on(Events.Error, (error) => {
       logger.error('Discord client error', error as Error);
     });
+
+    logger.info('Event handlers setup completed');
   }
 
   public async start(): Promise<void> {
+    if (this.isStarted) {
+      logger.warn('Attempted to start DiscordBot that is already running');
+      return;
+    }
+
     try {
       // Set up event handlers
       this.setupEventHandlers();
@@ -259,50 +419,65 @@ export class DiscordBot {
       // Login to Discord
       await this.client.login(this.token);
       
+      this.isStarted = true;
       logger.info('Discord bot successfully started');
       
       // Set bot's activity status
       this.client.user?.setActivity('DMs', { type: ActivityType.Watching });
     } catch (error) {
+      this.isStarted = false;
       logger.error('Failed to start Discord bot', error as Error);
       throw error;
     }
   }
 
   public async stop(): Promise<void> {
+    if (!this.isStarted) {
+      logger.warn('Attempted to stop DiscordBot that is not running');
+      return;
+    }
+
     try {
-      logger.info('Shutting down Discord bot...', { instanceId: this.instanceId });
+      logger.info('Shutting down Discord bot...');
+      this.client.removeAllListeners();
       await this.client.destroy();
-      DiscordBot.instance = null;
-      logger.info('Discord bot successfully shut down', { instanceId: this.instanceId });
+      this.isStarted = false;
+      DiscordBot._instance = null;
+
+      // Remove lock file
+      if (fs.existsSync(DiscordBot.LOCK_FILE)) {
+        fs.unlinkSync(DiscordBot.LOCK_FILE);
+        logger.info('Removed lock file', {
+          pid: process.pid,
+          lockFile: DiscordBot.LOCK_FILE
+        });
+      }
+
+      logger.info('Discord bot successfully shut down');
     } catch (error) {
-      logger.error('Error shutting down Discord bot', error as Error, { instanceId: this.instanceId });
+      logger.error('Error shutting down Discord bot', error as Error);
       throw error;
     }
   }
 }
 
-// Modify singleton export
-let discordBotInstance: DiscordBot | null = null;
-
-export function getDiscordBot(): DiscordBot {
-  if (!discordBotInstance) {
-    discordBotInstance = new DiscordBot();
-  }
-  return discordBotInstance;
-}
+// Export only the getInstance method
+export const getDiscordBot = DiscordBot.getInstance.bind(DiscordBot);
 
 // Handle process termination
 process.on('SIGTERM', async () => {
   logger.info('Received SIGTERM signal');
-  if (discordBotInstance) {
-    await discordBotInstance.stop();
-  }
+  await DiscordBot.getInstance().stop();
 });
 
 process.on('SIGINT', async () => {
   logger.info('Received SIGINT signal');
-  if (discordBotInstance) {
-    await discordBotInstance.stop();
-  }
+  await DiscordBot.getInstance().stop();
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', async (error) => {
+  logger.error('Uncaught exception', error);
+  await DiscordBot.getInstance().stop();
+  process.exit(1);
 });

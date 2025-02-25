@@ -4,13 +4,14 @@ import { enhancedLogger as logger } from '../utils/logger';
 import type { Document, DocumentMetadata } from './supabase';
 
 /**
- * Creates a text embedding using OpenAI's text-embedding-ada-002 model
+ * Creates a text embedding using OpenAI's text-embedding-3-small model
  */
 export async function createEmbedding(text: string): Promise<number[]> {
     try {
         const response = await openai.embeddings.create({
-            model: 'text-embedding-ada-002',
-            input: text
+            model: 'text-embedding-3-small',
+            input: text,
+            encoding_format: 'float'
         });
         
         if (!response.data[0]?.embedding) {
@@ -63,17 +64,23 @@ export async function storeDocument(doc: {
 
 /**
  * Search for similar documents using vector similarity
+ * @param queryText - The text to search for
+ * @param limit - Maximum number of results to return (default: 5)
+ * @param filter - Optional JSONB filter for metadata (e.g., { type: "photography_tip" })
+ * @returns Array of documents with similarity scores
  */
 export async function searchSimilarDocuments(
     queryText: string,
-    limit: number = 5
+    limit: number = 5,
+    filter: Record<string, unknown> = {}
 ): Promise<Document[]> {
     try {
         const queryEmbedding = await createEmbedding(queryText);
         
         const { data, error } = await supabase.rpc('match_documents', {
             query_embedding: queryEmbedding,
-            match_count: limit
+            match_count: limit,
+            filter: filter
         });
         
         if (error) throw error;
@@ -83,7 +90,8 @@ export async function searchSimilarDocuments(
     } catch (error) {
         logger.error('Failed to search documents', error as Error, {
             queryText,
-            limit
+            limit,
+            filter
         });
         return [];
     }
@@ -93,7 +101,11 @@ export async function searchSimilarDocuments(
  * Document matcher class for compatibility with existing code
  */
 export class DocumentMatcher {
-    public async matchDocuments(query: string, limit: number = 5): Promise<Document[]> {
-        return searchSimilarDocuments(query, limit);
+    public async matchDocuments(
+        query: string,
+        limit: number = 5,
+        filter: Record<string, unknown> = {}
+    ): Promise<Document[]> {
+        return searchSimilarDocuments(query, limit, filter);
     }
 } 
