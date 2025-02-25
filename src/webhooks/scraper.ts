@@ -6,8 +6,9 @@ import { preprocessUrl, isValidUrl } from '../utils/urlProcessor';
 
 // Environment validation
 const PUPPETEER_ENDPOINT = process.env.PUPPETEER_ENDPOINT;
+// Make endpoint optional
 if (!PUPPETEER_ENDPOINT) {
-    throw new Error('Missing required environment variable: PUPPETEER_ENDPOINT');
+    logger.warn('PUPPETEER_ENDPOINT not set, web scraping functionality will be limited');
 }
 
 // Response type from Puppeteer service
@@ -41,15 +42,21 @@ export interface ScraperResponse {
  * Scrape a URL using the Puppeteer service
  */
 export async function scrapeUrl(url: string): Promise<ScraperResponse | null> {
+    // If no endpoint is configured, return minimal response
+    if (!PUPPETEER_ENDPOINT) {
+        return {
+            url,
+            title: 'Web scraping not configured',
+            description: 'PUPPETEER_ENDPOINT not set',
+            content: 'Please configure PUPPETEER_ENDPOINT to enable web scraping.'
+        };
+    }
+
     try {
         const payload = {
             url,
             format: 'json' as const
         };
-
-        if (!PUPPETEER_ENDPOINT) {
-            throw new Error('PUPPETEER_ENDPOINT is not defined');
-        }
 
         const response = await axios.post<PuppeteerResponse>(PUPPETEER_ENDPOINT, payload, {
             headers: {
