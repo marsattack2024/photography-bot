@@ -1,12 +1,7 @@
-import OpenAI from 'openai';
+import { openai } from '../utils/openai';
 import { supabase } from './supabase';
 import { enhancedLogger as logger } from '../utils/logger';
 import type { Document, DocumentMetadata } from './supabase';
-
-// Initialize OpenAI client
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY
-});
 
 /**
  * Creates a text embedding using OpenAI's text-embedding-ada-002 model

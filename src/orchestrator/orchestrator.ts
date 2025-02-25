@@ -1,21 +1,8 @@
-import OpenAI from 'openai';
 import { enhancedLogger as logger } from '../utils/logger';
+import { openai, OPENAI_MODEL } from '../utils/openai';
 import { BaseAgent, AgentContext, AgentResponse } from './baseAgent';
 import { extractUrlsFromText } from '../utils/urlProcessor';
 import { scrapeUrl } from '../webhooks/scraper';
-
-// Validate OpenAI configuration
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4-turbo';
-
-if (!OPENAI_API_KEY) {
-    throw new Error('Missing OPENAI_API_KEY environment variable');
-}
-
-// OpenAI client
-const openai = new OpenAI({
-    apiKey: OPENAI_API_KEY
-});
 
 // Router prompt for specialist selection
 const ROUTER_PROMPT = `You are a routing assistant that determines which specialist agents should handle a user's request.

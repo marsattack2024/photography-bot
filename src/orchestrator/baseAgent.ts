@@ -1,18 +1,12 @@
 import { enhancedLogger as logger } from '../utils/logger';
-import OpenAI from 'openai';
+import { openai, OPENAI_MODEL } from '../utils/openai';
 
 // Validate OpenAI configuration
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4-turbo';
 
 if (!OPENAI_API_KEY) {
     throw new Error('Missing OPENAI_API_KEY environment variable');
 }
-
-// OpenAI client
-const openai = new OpenAI({
-    apiKey: OPENAI_API_KEY
-});
 
 export interface AgentContext {
     relevantDocs?: string[];

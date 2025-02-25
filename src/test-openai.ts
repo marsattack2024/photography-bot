@@ -4,66 +4,108 @@ import dotenv from 'dotenv';
 // Load environment variables
 dotenv.config();
 
-const apiKey = process.env.OPENAI_API_KEY;
-const basePath = process.env.OPENAI_API_BASE_PATH;
+// Validate environment variables
+const apiKey = process.env.OPENAI_API_KEY?.trim();
+const orgId = process.env.OPENAI_ORG_ID?.trim();
+const projectId = process.env.OPENAI_PROJECT_ID?.trim();
+const basePath = process.env.OPENAI_API_BASE_PATH?.trim() || 'https://api.openai.com/v1';
 
+// Validate required configuration
 if (!apiKey) {
-    throw new Error('OPENAI_API_KEY environment variable is not set');
+    throw new Error('OPENAI_API_KEY is required');
 }
 
-console.log('Testing OpenAI connection...');
-console.log(`API Key format check: ${apiKey.substring(0, 5)}... (should start with 'sk-')`);
-console.log(`Using base URL: ${basePath}`);
+if (!apiKey.startsWith('sk-proj-')) {
+    throw new Error('API key must start with sk-proj- for project-based authentication');
+}
 
-// Configure OpenAI client
+if (!orgId) {
+    throw new Error('OPENAI_ORG_ID is required for project-based authentication');
+}
+
+console.log('OpenAI Configuration Test');
+console.log('------------------------');
+console.log(`API Key Format: ${apiKey.substring(0, 8)}... (${apiKey.length} chars)`);
+console.log(`Organization ID: ${orgId}`);
+console.log(`Project ID: ${projectId || 'Not specified'}`);
+console.log(`Base URL: ${basePath}`);
+
+// Configure OpenAI client with required headers for project-based authentication
 const openai = new OpenAI({
-    apiKey: apiKey,
+    apiKey,
+    organization: orgId,  // Required for project-based authentication
     baseURL: basePath,
-    timeout: 10000, // 10 second timeout
+    defaultHeaders: {
+        'OpenAI-Organization': orgId,  // Explicitly set organization header
+        'Content-Type': 'application/json',
+    },
+    timeout: 30000, // 30 second timeout
 });
 
 async function testConnection() {
     try {
-        console.log('\nStep 1: Testing API key validity...');
-        
-        console.log('\nStep 2: Fetching available models...');
-        const models = await openai.models.list();
-        console.log('Available models:', models.data.map(m => m.id).join(', '));
+        console.log('\nTesting API Connection');
+        console.log('--------------------');
 
-        console.log('\nStep 3: Testing chat completion...');
-        const completion = await openai.chat.completions.create({
-            model: process.env.OPENAI_MODEL || 'gpt-4-turbo-preview',
-            messages: [{ role: 'user', content: 'Hello!' }],
-            max_tokens: 50
-        });
-
-        console.log('Chat completion response:', completion.choices[0]?.message);
-        console.log('\nAll tests passed successfully!');
-        
-    } catch (error: any) {
-        console.error('\nError testing OpenAI connection:');
-        
-        if (error.response) {
-            // The request was made and the server responded with a status code
-            console.error('Response error:', {
-                status: error.response.status,
-                statusText: error.response.statusText,
-                data: error.response.data
-            });
-        } else if (error.request) {
-            // The request was made but no response was received
-            console.error('Request error - no response received');
-            console.error('Request details:', error.request);
-        } else {
-            // Something happened in setting up the request
-            console.error('Error details:', error.message);
+        // Test 1: List Models
+        console.log('\n1. Testing Models API...');
+        try {
+            const models = await openai.models.list();
+            console.log('✓ Models API accessible');
+            console.log('Available models:', models.data.map(m => m.id).join(', '));
+        } catch (error: any) {
+            console.error('✗ Models API failed:', error.message);
+            throw error;
         }
 
-        // Log the full error object for debugging
-        console.error('\nFull error object:', JSON.stringify(error, null, 2));
+        // Test 2: Simple Chat Completion
+        console.log('\n2. Testing Chat Completions API...');
+        try {
+            const completion = await openai.chat.completions.create({
+                model: 'gpt-4-turbo-preview',
+                messages: [{ role: 'user', content: 'Hello!' }],
+                max_tokens: 50
+            });
+            console.log('✓ Chat Completions API accessible');
+            console.log('Response:', completion.choices[0]?.message?.content);
+        } catch (error: any) {
+            console.error('✗ Chat Completions API failed:', error.message);
+            throw error;
+        }
+
+        console.log('\n✓ All tests completed successfully!');
         
+    } catch (error: any) {
+        console.error('\nConnection Test Failed');
+        console.error('--------------------');
+        
+        if (error.response) {
+            // API responded with an error
+            console.error('API Error Details:');
+            console.error('Status:', error.response.status);
+            console.error('Message:', error.response.data?.error?.message || 'No error message provided');
+            
+            // Log request details for debugging
+            console.error('\nRequest Details:');
+            if (error.config) {
+                console.error('URL:', error.config.url);
+                console.error('Headers:', JSON.stringify(error.config.headers, null, 2));
+                if (error.config.data) {
+                    console.error('Data:', JSON.stringify(JSON.parse(error.config.data), null, 2));
+                }
+            }
+        } else if (error.request) {
+            // Request was made but no response received
+            console.error('Network Error: No response received from API');
+            console.error('Request:', error.request);
+        } else {
+            // Error in setting up the request
+            console.error('Setup Error:', error.message);
+        }
+
         process.exit(1);
     }
 }
 
+// Run the test
 testConnection(); 
