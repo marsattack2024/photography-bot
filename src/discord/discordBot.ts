@@ -12,6 +12,48 @@ export class DiscordBot {
   private readonly token: string;
   private orchestrator: Orchestrator;
 
+  // Helper function to split long messages
+  private splitMessage(content: string, maxLength: number = 1900): string[] {
+    if (content.length <= maxLength) {
+      return [content];
+    }
+
+    const parts: string[] = [];
+    let currentPart = '';
+    const lines = content.split('\n');
+
+    for (const line of lines) {
+      if (currentPart.length + line.length + 1 > maxLength) {
+        if (currentPart) {
+          parts.push(currentPart.trim());
+          currentPart = '';
+        }
+        // If a single line is too long, split it
+        if (line.length > maxLength) {
+          const words = line.split(' ');
+          for (const word of words) {
+            if (currentPart.length + word.length + 1 > maxLength) {
+              parts.push(currentPart.trim());
+              currentPart = word;
+            } else {
+              currentPart += (currentPart ? ' ' : '') + word;
+            }
+          }
+        } else {
+          currentPart = line;
+        }
+      } else {
+        currentPart += (currentPart ? '\n' : '') + line;
+      }
+    }
+
+    if (currentPart) {
+      parts.push(currentPart.trim());
+    }
+
+    return parts;
+  }
+
   constructor() {
     // Validate environment variables
     const token = process.env.DISCORD_BOT_TOKEN;
@@ -124,9 +166,7 @@ export class DiscordBot {
 
           // Send the response
           if (response.error) {
-            await message.reply({
-              content: response.content || 'I encountered an error processing your request. Please try again.'
-            });
+            await this.handleError(message);
           } else {
             let replyContent = response.content;
             
@@ -135,7 +175,11 @@ export class DiscordBot {
               replyContent += '\n\nSources:\n' + response.sources.map(s => `• ${s}`).join('\n');
             }
 
-            await message.reply({ content: replyContent });
+            // Split and send the message in parts if it's too long
+            const parts = this.splitMessage(replyContent);
+            for (const part of parts) {
+              await message.reply({ content: part });
+            }
           }
         }
 
@@ -158,9 +202,11 @@ export class DiscordBot {
 
   private async handleError(message: Message): Promise<void> {
     try {
-      await message.reply({
-        content: 'I apologize, but I encountered an error processing your message. Please try again later.',
-      });
+      const errorMessage = 'I apologize, but I encountered an error processing your message. Please try again later.';
+      const parts = this.splitMessage(errorMessage);
+      for (const part of parts) {
+        await message.reply({ content: part });
+      }
     } catch (error) {
       logger.error('Failed to send error message to user', error as Error, {
         userId: message.author.id,
